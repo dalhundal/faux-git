@@ -95,10 +95,10 @@ commitsTimeDelta = float(commits[0].committed_date - commits[len(commits)-1].com
 
 ## If no time is specified, ask for one
 if args.time is None:
-	args.time = prompt("Start Time?",type=argtype_datetime)
+	args.time = prompt("Start Time?",type=argtype_datetime,allow_empty=True)
 
 ## If no end time is specified, ask for one (if theres more than one commit to operate on)
-if args.time_end is None and args.count > 1:
+if args.time is not None and args.time_end is None and args.count > 1:
 	suggestedTimeEnd = datetimeToString(args.time + datetime.timedelta(seconds=commitsTimeDelta))
 	args.time_end = prompt("End Time?",type=argtype_datetime,default=suggestedTimeEnd)
 else:
@@ -113,18 +113,13 @@ if args.email is None:
 	args.email = prompt("Email? leave blank for no change",type=argtype_email, allow_empty=True)
 
 
-
-args.timeDelta = secondsBetweenDateTimes(args.time, args.time_end)
-
 def translateDatetime(t):
 	if (commitsTimeDelta > 0):
-		seconds = round(((t-commits[len(commits)-1].committed_date)/commitsTimeDelta) * args.timeDelta)
+		seconds = round(((t-commits[len(commits)-1].committed_date)/commitsTimeDelta) * secondsBetweenDateTimes(args.time, args.time_end))
 		return args.time + datetime.timedelta(seconds=seconds)
 	else:
 		return args.time
 
-print ("Target time range: [%s] to [%s]" % (args.time, args.time_end))
-print ("Mapping [%d] seconds to [%d] seconds" % (args.timeDelta, commitsTimeDelta))
 print ("Operating on %d commits" % len(commits))
 print ()
 datetimeHashes = []
@@ -132,10 +127,12 @@ for commit in reversed(commits):
 	commitDatetime = datetime.datetime.fromtimestamp(commit.committed_date)
 	authorDatetime = datetime.datetime.fromtimestamp(commit.authored_date)
 	print("%s <%s> => %s <%s>" % (commit.committer.name, commit.committer.email, args.name, args.email))
-	print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translateDatetime(commit.committed_date))))
+	if (args.time is not None):
+		translatedDatetime = translateDatetime(commit.committed_date)
+		datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translatedDatetime)))
+		print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translatedDatetime)))
 	print()
-	datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translateDatetime(commit.committed_date))))
-	
+
 	if (args.force == False):
 		if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
 			raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
@@ -161,8 +158,13 @@ git filter-branch --env-filter '
         FAUX_RUN=1
     fi
     if [ $FAUX_RUN -eq 1 ]; then
-        export GIT_AUTHOR_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
-        export GIT_COMMITTER_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
+        if [ -n "${FAUX_DATES[X_${GIT_COMMIT}]}" ]; then
+            export GIT_AUTHOR_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
+            export GIT_COMMITTER_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
+        else:
+            export GIT_AUTHOR_DATE=$GIT_AUTHOR_DATE
+            export GIT_COMMITTER_DATE=$GIT_COMMITTER_DATE
+        fi
         if [ -n "$FAUX_NAME" ]; then
             export GIT_AUTHOR_NAME=$FAUX_NAME
             export GIT_COMMITTER_NAME=$FAUX_NAME
