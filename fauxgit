@@ -99,7 +99,16 @@ if args.ref is None:
 if args.count is None:
 	args.count = prompt("How many?",type=int, default=1)
 
+## Get the commits
 commits = list(repo.iter_commits(args.ref,max_count=args.count))
+
+## Check all commits to see if they're in a remote branch
+if (args.force == False):
+	for commit in commits:
+		if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
+			raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
+			
+## Figure out the time window the commits span
 commitsTimeDelta = float(commits[0].committed_date - commits[len(commits)-1].committed_date)
 
 ## If no time is specified, ask for one
@@ -141,10 +150,6 @@ for commit in reversed(commits):
 		datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translatedDatetime)))
 		print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translatedDatetime)))
 	print()
-
-	if (args.force == False):
-		if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
-			raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
 next
 
 print()
