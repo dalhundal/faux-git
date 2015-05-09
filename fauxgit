@@ -1,0 +1,104 @@
+#!/usr/bin/python
+# FAUX GIT
+
+from __future__ import print_function
+
+import argparse
+import datetime
+import sys
+
+import git
+from git import Repo
+
+def datetimeToString(t):
+	return datetime.datetime.strftime(t,"%a %d %b %Y %H:%M")
+
+def datetimeToGitString(t):
+	return datetime.datetime.strftime(t,"%a %b %d %H:%M:%S %Y %z").strip()
+
+def secondsBetweenDateTimes(dt1,dt2):
+	delta = (dt2 - dt1)
+	return delta.days*24*60*60 + delta.seconds
+##
+
+
+repo = Repo('./test')
+## Set up the argument parser
+
+parser = argparse.ArgumentParser(description='Faux Git')
+parser.add_argument('hash',help='Last hash in range')
+parser.add_argument('numCommits',help='How many?')
+parser.add_argument('timeStart',help='Start here')
+parser.add_argument('timeEnd',help='End here')
+parser.add_argument('Author',help='Who you is')
+parser.add_argument('AuthorEmail',help='Who you is by email')
+args = parser.parse_args(sys.argv[1:])
+
+
+args.timeStart = datetime.datetime.strptime(args.timeStart,"%Y-%m-%d %H:%M")
+args.timeEnd = datetime.datetime.strptime(args.timeEnd,"%Y-%m-%d %H:%M")
+args.timeDelta = secondsBetweenDateTimes(args.timeStart, args.timeEnd)
+
+commits = list(repo.iter_commits(args.hash,max_count=args.numCommits))
+commitsTimeDelta = float(commits[0].committed_date - commits[len(commits)-1].committed_date)
+
+def translateDatetime(t):
+	seconds = round(((t-commits[len(commits)-1].committed_date)/commitsTimeDelta) * args.timeDelta)
+	return args.timeStart + datetime.timedelta(seconds=seconds)
+
+print ("Target time range: [%s] to [%s]" % (args.timeStart, args.timeEnd))
+print ("Mapping [%d] seconds to [%d] seconds" % (args.timeDelta, commitsTimeDelta))
+print ("Operating on %d commits" % len(commits))
+print ()
+datetimeHashes = []
+for commit in reversed(commits):
+	commitDatetime = datetime.datetime.fromtimestamp(commit.committed_date)
+	authorDatetime = datetime.datetime.fromtimestamp(commit.authored_date)
+	print("%s <%s> => %s <%s>" % (commit.committer.name, commit.committer.email, args.Author, args.AuthorEmail))
+	print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translateDatetime(commit.committed_date))))
+	print()
+	datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translateDatetime(commit.committed_date))))
+	
+	if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
+		raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
+next
+
+print()
+print()
+
+output = '''
+git filter-branch --env-filter '
+    FAUX_HASH_START="%s"
+    FAUX_HASH_END="%s"
+    FAUX_EMAIL="%s"
+    FAUX_NAME="%s"
+    declare -A FAUX_DATES
+    %s
+    FAUX_RUN=0
+    if [ $FAUX_HASH_START == $GIT_COMMIT ]; then
+        export FAUX_RUN=1
+    elif [ $FAUX_HASH_END == $GIT_COMMIT ]; then
+        FAUX_RUN=1
+    elif git rev-list $FAUX_HASH_START...$FAUX_HASH_END | grep $GIT_COMMIT; then
+        FAUX_RUN=1
+    fi
+    if [ $FAUX_RUN -eq 1 ]; then
+        export GIT_AUTHOR_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
+        export GIT_COMMITTER_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
+        export GIT_AUTHOR_NAME=$FAUX_NAME
+        export GIT_AUTHOR_EMAIL=$FAUX_EMAIL
+        export GIT_COMMITTER_NAME=$FAUX_NAME
+        export GIT_COMMITTER_EMAIL=$FAUX_EMAIL
+    fi
+' --  --all
+rm -rf .git-rewrite
+git for-each-ref --format="%%(refname)" refs/original/ | xargs -n 1 git update-ref -d
+''' % (
+	str(commits[len(commits)-1]),
+	str(commits[0]),
+	args.AuthorEmail,
+	args.Author,
+	"\n    ".join(datetimeHashes)
+)
+
+print(output)
