@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import argparse
 import datetime
+import re
 import sys
 
 import git
@@ -23,20 +24,40 @@ def secondsBetweenDateTimes(dt1,dt2):
 
 
 repo = Repo('./test')
-## Set up the argument parser
 
+### Argument type checkers
+def argtype_hash(value):
+	try:
+		value = str(repo.commit(value))
+	except git.exc.BadObject, e:
+		raise argparse.ArgumentTypeError("%s is not a valid hash for this git repo" % value)
+	return value
+
+def argtype_datetime(value):
+	try:
+		value = datetime.datetime.strptime(value,"%Y-%m-%d %H:%M")
+	except ValueError, e:
+		raise argparse.ArgumentTypeError("%s is not a valid date-time in the format YYYY-MM-DD HH:MM" % value)
+	return value
+
+def argtype_email(value):
+	## This is a very simplistic email validator, adequate for the purpose here
+	if re.match('[\.\w]{1,}[@]\w+[.]\w+',value):
+		return value
+	else:
+		raise argparse.ArgumentTypeError("%s is not a valid email address" % value)
+
+## Set up the argument parser
 parser = argparse.ArgumentParser(description='Faux Git')
-parser.add_argument('hash',help='Last hash in range')
-parser.add_argument('numCommits',help='How many?')
-parser.add_argument('timeStart',help='Start here')
-parser.add_argument('timeEnd',help='End here')
-parser.add_argument('Author',help='Who you is')
-parser.add_argument('AuthorEmail',help='Who you is by email')
+parser.add_argument('hash',help='Last hash in range',default=None,type=argtype_hash)
+parser.add_argument('numCommits',help='How many?',default=None,type=int)
+parser.add_argument('timeStart',help='Start here',default=None,type=argtype_datetime)
+parser.add_argument('timeEnd',help='End here',default=None,type=argtype_datetime)
+parser.add_argument('Author',help='Who you is',default=None)
+parser.add_argument('AuthorEmail',help='Who you is by email',default=None,type=argtype_email)
 args = parser.parse_args(sys.argv[1:])
 
 
-args.timeStart = datetime.datetime.strptime(args.timeStart,"%Y-%m-%d %H:%M")
-args.timeEnd = datetime.datetime.strptime(args.timeEnd,"%Y-%m-%d %H:%M")
 args.timeDelta = secondsBetweenDateTimes(args.timeStart, args.timeEnd)
 
 commits = list(repo.iter_commits(args.hash,max_count=args.numCommits))
