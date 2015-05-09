@@ -5,7 +5,9 @@ from __future__ import print_function
 
 import argparse
 import datetime
+import os
 import re
+import subprocess
 import sys
 
 import git
@@ -28,7 +30,15 @@ def secondsBetweenDateTimes(dt1,dt2):
 ### Argument type checkers
 def argtype_path(value):
 	global repo
-	repo = Repo(value)
+	try:
+		value = os.path.abspath(value)
+		if (os.path.exists(value) == False):
+			raise argparse.ArgumentTypeError("Path does not exist: %s" % value)
+		repo = Repo(value)
+	except git.exc.NoSuchPathError, e:
+		raise argparse.ArgumentTypeError("Path does not exist: %s" % value)
+	except git.exc.InvalidGitRepositoryError, e:
+		raise argparse.ArgumentTypeError("No valid git repository at %s" % value)
 	return value
 
 def argtype_ref(value):
@@ -107,7 +117,7 @@ if (args.force == False):
 	for commit in commits:
 		if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
 			raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
-			
+
 ## Figure out the time window the commits span
 commitsTimeDelta = float(commits[0].committed_date - commits[len(commits)-1].committed_date)
 
@@ -144,11 +154,18 @@ datetimeHashes = []
 for commit in reversed(commits):
 	commitDatetime = datetime.datetime.fromtimestamp(commit.committed_date)
 	authorDatetime = datetime.datetime.fromtimestamp(commit.authored_date)
-	print("%s <%s> => %s <%s>" % (commit.committer.name, commit.committer.email, args.name, args.email))
+	print(commit)
+	if args.name is not None:
+		print (" Committer Name: [%s] > [%s]" % (commit.committer.name, args.name))
+		print ("    Author Name: [%s] > [%s]" % (commit.author.name, args.name))
+	if args.email is not None:
+		print ("Committer Email: [%s] > [%s]" % (commit.committer.email, args.email))
+		print ("   Author Email: [%s] > [%s]" % (commit.author.email, args.email))
 	if (args.time is not None):
 		translatedDatetime = translateDatetime(commit.committed_date)
 		datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translatedDatetime)))
-		print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translatedDatetime)))
+		print ("    Commit Time: [%s] > [%s]" % (datetimeToString(commitDatetime), datetimeToString(translatedDatetime)))
+		print ("    Author Time: [%s] > [%s]" % (datetimeToString(authorDatetime), datetimeToString(translatedDatetime)))
 	print()
 next
 
@@ -156,6 +173,7 @@ print()
 print()
 
 output = '''
+cd %s
 git filter-branch --env-filter '
     FAUX_HASH_START="%s"
     FAUX_HASH_END="%s"
@@ -192,6 +210,7 @@ git filter-branch --env-filter '
 rm -rf .git-rewrite
 git for-each-ref --format="%%(refname)" refs/original/ | xargs -n 1 git update-ref -d
 ''' % (
+	args.path,
 	str(commits[len(commits)-1]),
 	str(commits[0]),
 	args.email if args.email is not None else "",
@@ -199,4 +218,5 @@ git for-each-ref --format="%%(refname)" refs/original/ | xargs -n 1 git update-r
 	"\n    ".join(datetimeHashes)
 )
 
-print(output)
+process = subprocess.Popen(output,stdout=subprocess.PIPE, shell=True)
+proc_stdout = process.communicate()[0].strip()
