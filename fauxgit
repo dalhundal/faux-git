@@ -11,7 +11,8 @@ import sys
 import git
 from git import Repo
 
-repo = Repo('./test')
+#repo = Repo('./test')
+repo = None
 
 ### Datetime utility functions
 def datetimeToString(t):
@@ -25,6 +26,11 @@ def secondsBetweenDateTimes(dt1,dt2):
 	return delta.days*24*60*60 + delta.seconds
 
 ### Argument type checkers
+def argtype_path(value):
+	global repo
+	repo = Repo(value)
+	return value
+
 def argtype_ref(value):
 	try:
 		value = str(repo.commit(value))
@@ -75,6 +81,7 @@ def prompt(message,type=None, default=None,allow_empty=False):
 
 ## Set up the argument parser
 parser = argparse.ArgumentParser(description='Faux Git')
+parser.add_argument('path',help='Path to git repo',default='.',nargs='?',type=argtype_path)
 parser.add_argument('--ref',help='Git ref',default=None,type=argtype_ref)
 parser.add_argument('--count',help='How many?',default=None,type=int)
 parser.add_argument('--time',help='Start here',default=None,type=argtype_datetime)
