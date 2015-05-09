@@ -11,8 +11,11 @@ import sys
 import git
 from git import Repo
 
+repo = Repo('./test')
+
+### Datetime utility functions
 def datetimeToString(t):
-	return datetime.datetime.strftime(t,"%a %d %b %Y %H:%M")
+	return datetime.datetime.strftime(t,"%Y-%m-%d %H:%M")
 
 def datetimeToGitString(t):
 	return datetime.datetime.strftime(t,"%a %b %d %H:%M:%S %Y %z").strip()
@@ -20,17 +23,13 @@ def datetimeToGitString(t):
 def secondsBetweenDateTimes(dt1,dt2):
 	delta = (dt2 - dt1)
 	return delta.days*24*60*60 + delta.seconds
-##
-
-
-repo = Repo('./test')
 
 ### Argument type checkers
-def argtype_hash(value):
+def argtype_ref(value):
 	try:
 		value = str(repo.commit(value))
 	except git.exc.BadObject, e:
-		raise argparse.ArgumentTypeError("%s is not a valid hash for this git repo" % value)
+		raise argparse.ArgumentTypeError("%s is not a valid ref for this git repo" % value)
 	return value
 
 def argtype_datetime(value):
@@ -47,27 +46,84 @@ def argtype_email(value):
 	else:
 		raise argparse.ArgumentTypeError("%s is not a valid email address" % value)
 
+## Prompter
+def prompt(message,type=None, default=None,allow_empty=False):
+	if default is None:
+		promptMessage = "%s > " % message
+	else:
+		promptMessage = "%s [%s] > " % (message, default)
+	while True:
+		value = raw_input(promptMessage)
+		if (value=='' and allow_empty == True):
+			return None
+		if (value=='' and default is not None):
+			value = default
+		if type is not None:
+			try:
+				value = type(value)
+				break
+			except argparse.ArgumentTypeError, e:
+				print(e)
+				continue
+			except ValueError, e:
+				print(e)
+				continue
+	return value
+
+
 ## Set up the argument parser
 parser = argparse.ArgumentParser(description='Faux Git')
-parser.add_argument('hash',help='Last hash in range',default=None,type=argtype_hash)
-parser.add_argument('numCommits',help='How many?',default=None,type=int)
-parser.add_argument('timeStart',help='Start here',default=None,type=argtype_datetime)
-parser.add_argument('timeEnd',help='End here',default=None,type=argtype_datetime)
-parser.add_argument('Author',help='Who you is',default=None)
-parser.add_argument('AuthorEmail',help='Who you is by email',default=None,type=argtype_email)
+parser.add_argument('--ref',help='Git ref',default=None,type=argtype_ref)
+parser.add_argument('--count',help='How many?',default=None,type=int)
+parser.add_argument('--time',help='Start here',default=None,type=argtype_datetime)
+parser.add_argument('--time-end',help='End here',default=None,type=argtype_datetime)
+parser.add_argument('--name',help='Who you is',default=None)
+parser.add_argument('--email',help='Who you is by email',default=None,type=argtype_email)
+parser.add_argument('--force',help='Force',default=False,action='store_true')
 args = parser.parse_args(sys.argv[1:])
 
+## If no ref specified, ask for one
+if args.ref is None:
+	args.ref = prompt("Git ref?",type=argtype_ref)
 
-args.timeDelta = secondsBetweenDateTimes(args.timeStart, args.timeEnd)
+## If no count is specified, ask for one
+if args.count is None:
+	args.count = prompt("How many?",type=int, default=1)
 
-commits = list(repo.iter_commits(args.hash,max_count=args.numCommits))
+commits = list(repo.iter_commits(args.ref,max_count=args.count))
 commitsTimeDelta = float(commits[0].committed_date - commits[len(commits)-1].committed_date)
 
-def translateDatetime(t):
-	seconds = round(((t-commits[len(commits)-1].committed_date)/commitsTimeDelta) * args.timeDelta)
-	return args.timeStart + datetime.timedelta(seconds=seconds)
+## If no time is specified, ask for one
+if args.time is None:
+	args.time = prompt("Start Time?",type=argtype_datetime)
 
-print ("Target time range: [%s] to [%s]" % (args.timeStart, args.timeEnd))
+## If no end time is specified, ask for one (if theres more than one commit to operate on)
+if args.time_end is None and args.count > 1:
+	suggestedTimeEnd = datetimeToString(args.time + datetime.timedelta(seconds=commitsTimeDelta))
+	args.time_end = prompt("End Time?",type=argtype_datetime,default=suggestedTimeEnd)
+else:
+	args.time_end = args.time
+
+## If no name is specified, ask for one - but allow it to be empty to mean 'no change'
+if args.name is None:
+	args.name = prompt("Name? leave blank for no change",type=str, allow_empty=True)
+
+## If no email is specified, ask for one - but allow it to be empty to mean 'no change'
+if args.email is None:
+	args.email = prompt("Email? leave blank for no change",type=argtype_email, allow_empty=True)
+
+
+
+args.timeDelta = secondsBetweenDateTimes(args.time, args.time_end)
+
+def translateDatetime(t):
+	if (commitsTimeDelta > 0):
+		seconds = round(((t-commits[len(commits)-1].committed_date)/commitsTimeDelta) * args.timeDelta)
+		return args.time + datetime.timedelta(seconds=seconds)
+	else:
+		return args.time
+
+print ("Target time range: [%s] to [%s]" % (args.time, args.time_end))
 print ("Mapping [%d] seconds to [%d] seconds" % (args.timeDelta, commitsTimeDelta))
 print ("Operating on %d commits" % len(commits))
 print ()
@@ -75,13 +131,14 @@ datetimeHashes = []
 for commit in reversed(commits):
 	commitDatetime = datetime.datetime.fromtimestamp(commit.committed_date)
 	authorDatetime = datetime.datetime.fromtimestamp(commit.authored_date)
-	print("%s <%s> => %s <%s>" % (commit.committer.name, commit.committer.email, args.Author, args.AuthorEmail))
+	print("%s <%s> => %s <%s>" % (commit.committer.name, commit.committer.email, args.name, args.email))
 	print("%s => %s" % (datetimeToString(commitDatetime), datetimeToString(translateDatetime(commit.committed_date))))
 	print()
 	datetimeHashes.append("FAUX_DATES[X_%s]=\"%s\"" % (str(commit), datetimeToGitString(translateDatetime(commit.committed_date))))
 	
-	if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
-		raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
+	if (args.force == False):
+		if len(repo.git.branch("-r", "--contains=%s" % str(commit)).strip()) > 0:
+			raise Exception("NO, THERE ARE SOME COMMITS IN THERE THAT HAVE BEEN PUSHED!")
 next
 
 print()
@@ -106,10 +163,14 @@ git filter-branch --env-filter '
     if [ $FAUX_RUN -eq 1 ]; then
         export GIT_AUTHOR_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
         export GIT_COMMITTER_DATE=${FAUX_DATES["X_"$GIT_COMMIT]}
-        export GIT_AUTHOR_NAME=$FAUX_NAME
-        export GIT_AUTHOR_EMAIL=$FAUX_EMAIL
-        export GIT_COMMITTER_NAME=$FAUX_NAME
-        export GIT_COMMITTER_EMAIL=$FAUX_EMAIL
+        if [ -n "$FAUX_NAME" ]; then
+            export GIT_AUTHOR_NAME=$FAUX_NAME
+            export GIT_COMMITTER_NAME=$FAUX_NAME
+        fi
+        if [ -n "$FAUX_EMAIL" ]; then
+            export GIT_AUTHOR_EMAIL=$FAUX_EMAIL
+            export GIT_COMMITTER_EMAIL=$FAUX_EMAIL
+        fi
     fi
 ' --  --all
 rm -rf .git-rewrite
@@ -117,8 +178,8 @@ git for-each-ref --format="%%(refname)" refs/original/ | xargs -n 1 git update-r
 ''' % (
 	str(commits[len(commits)-1]),
 	str(commits[0]),
-	args.AuthorEmail,
-	args.Author,
+	args.email if args.email is not None else "",
+	args.name if args.name is not None else "",
 	"\n    ".join(datetimeHashes)
 )
 
