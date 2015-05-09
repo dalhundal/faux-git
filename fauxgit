@@ -48,7 +48,9 @@ def argtype_email(value):
 
 ## Prompter
 def prompt(message,type=None, default=None,allow_empty=False):
-	if default is None:
+	if allow_empty == True:
+		promptMessage = "%s [leave empty for no change] > " % message
+	elif default is None:
 		promptMessage = "%s > " % message
 	else:
 		promptMessage = "%s [%s] > " % (message, default)
@@ -106,11 +108,11 @@ else:
 
 ## If no name is specified, ask for one - but allow it to be empty to mean 'no change'
 if args.name is None:
-	args.name = prompt("Name? leave blank for no change",type=str, allow_empty=True)
+	args.name = prompt("Name?",type=str, allow_empty=True)
 
 ## If no email is specified, ask for one - but allow it to be empty to mean 'no change'
 if args.email is None:
-	args.email = prompt("Email? leave blank for no change",type=argtype_email, allow_empty=True)
+	args.email = prompt("Email?",type=argtype_email, allow_empty=True)
 
 
 def translateDatetime(t):
